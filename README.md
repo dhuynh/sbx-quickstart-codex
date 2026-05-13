@@ -1,4 +1,4 @@
-# Docker Sandboxes: A Hands-On Guide with Claude
+# Docker Sandboxes: A Hands-On Guide with Codex
 
 > **Status**: This guide covers the Docker Sandboxes `sbx` release as of its experimental launch.
 
@@ -6,7 +6,7 @@
 
 ## What you'll need
 
-- A paid Claude subscription
+- An OpenAI account with Codex access, or an `OPENAI_API_KEY`
 - A GitHub account with a token that has permissions to push and pull
 - macOS on Apple Silicon or Windows 11
 
@@ -15,18 +15,18 @@
 By the end of this guide you'll be able to:
 
 - Install and configure the `sbx` CLI
-- Run Claude autonomously inside an isolated microVM sandbox
+- Run Codex autonomously inside an isolated microVM sandbox
 - Store credentials securely and have them injected automatically
-- Use branch mode to let Claude work on its own Git branch without touching your working tree
+- Use branch mode to let Codex work on its own Git branch without touching your working tree
 - Run multiple agents in parallel on the same repo
 - Forward live ports from a sandbox to your browser
-- Manage network policies so Claude can only reach what you allow
+- Manage network policies so Codex can only reach what you allow
 - Mount multiple workspaces and debug inside a running sandbox
 
 The guide uses **DevBoard** — a full-stack Next.js + FastAPI issue tracker included
 alongside this file (`backend/`, `frontend/`, `docker-compose.yml`). DevBoard has
 real-world complexity: a REST API, a Postgres database, JWT auth, tests, and a handful
-of intentional bugs and unfinished features that make ideal exercises for Claude.
+of intentional bugs and unfinished features that make ideal exercises for Codex.
 
 ---
 
@@ -55,15 +55,15 @@ of intentional bugs and unfinished features that make ideal exercises for Claude
 
 ## 1. How Docker Sandboxes work
 
-When you run `sbx run claude`, Docker Sandboxes:
+When you run `sbx run codex`, Docker Sandboxes:
 
 1. Spins up a **lightweight microVM** — its own Linux kernel, not just a container namespace.
-2. Gives the VM a **private Docker daemon**, so Claude can run `docker build` or `docker compose up` without touching your host Docker.
+2. Gives the VM a **private Docker daemon**, so Codex can run `docker build` or `docker compose up` without touching your host Docker.
 3. **Mounts your workspace directory** at its exact host path inside the VM. File changes are instant in both directions — no copy-on-write delay.
-4. Routes all HTTP/HTTPS traffic from the VM through a **host-side proxy** that enforces your network policy and injects API credentials. Claude never sees raw credentials.
-5. Starts Claude with `--dangerously-skip-permissions` so it can act autonomously without prompting you on every file change.
+4. Routes all HTTP/HTTPS traffic from the VM through a **host-side proxy** that enforces your network policy and injects API credentials. Codex never sees raw credentials.
+5. Starts Codex preconfigured to run without approval prompts inside the sandbox boundary.
 
-The result: Claude can build images, install packages, run tests, and edit your code —
+The result: Codex can build images, install packages, run tests, and edit your code —
 and none of that can escape the VM to touch your host system, your other containers,
 or any network destination you haven't explicitly allowed.
 
@@ -73,7 +73,7 @@ Your machine
 ├── Host filesystem       ← workspace dir shared (read/write); nothing else
 │
 └── Sandbox (microVM)
-    ├── Private Docker daemon  ← Claude builds here
+    ├── Private Docker daemon  ← Codex builds here
     ├── /your/workspace        ← live-mounted from host
     └── Outbound HTTP proxy    ← enforces network policy, injects creds
 ```
@@ -125,15 +125,15 @@ Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -All
 winget install -h Docker.sbx
 ```
 
-> **Windows note**: By default, Windows sandboxes use non-Docker template variants —
-> the `docker` command isn't available inside the VM. If you need Docker-in-sandbox
-> (required for the Docker Compose exercise), pass `--template`:
+> **Windows note**: The Codex template documented by Docker is
+> `docker/sandbox-templates:codex`. It includes the standard sandbox toolchain for
+> running Codex in the VM:
 >
 > ```powershell
-> sbx create --template docker.io/docker/sandbox-templates:claude-code-docker --name=quickstart claude .
+> sbx create --template docker.io/docker/sandbox-templates:codex --name=quickstart codex .
 > ```
 
-Now that `sbx`has been installed it's time to do some initial configuration. 
+Now that `sbx` has been installed, it's time to do some initial configuration.
 
 **Sign in**
 
@@ -166,13 +166,30 @@ hosts later with `sbx policy allow`.
 ## 4. Secrets and credentials
 
 `sbx` has a built-in secrets manager that stores credentials in your OS keychain —
-never in plain text on disk or inside the VM. When Claude makes an outbound request
+never in plain text on disk or inside the VM. When Codex makes an outbound request
 that needs authentication, the host-side proxy intercepts it and injects the credential
-automatically. Claude can make authenticated API calls but can never read, log, or
+automatically. Codex can make authenticated API calls but can never read, log, or
 exfiltrate the raw credential.
 
-Store your GitHub token **now**, before creating a sandbox. The `-g` flag makes it
-global — available to all sandboxes you create:
+Codex supports two authentication paths. Use either an OpenAI API key:
+
+```bash
+sbx secret set -g openai
+```
+
+Or use OpenAI OAuth from your host:
+
+```bash
+sbx secret set -g openai --oauth
+```
+
+The OAuth flow opens a browser on your host machine, stores the resulting token in
+your OS keychain, and makes it available to new sandboxes without exposing it inside
+the VM.
+
+Store your GitHub token too if you want Codex to push branches, open PRs, or use
+`gh` inside the sandbox. The `-g` flag makes it global — available to all sandboxes
+you create:
 
 ```bash
 echo "$(gh auth token)" | sbx secret set -g github
@@ -183,7 +200,7 @@ echo "$(gh auth token)" | sbx secret set -g github
 > Sandbox-scoped secrets (without `-g`) can be added at any time and override the
 > global value for that sandbox.
 
-You can doublecheck that the credential was added. 
+You can double-check that the credential was added.
 
 ```bash
 sbx secret ls
@@ -200,7 +217,6 @@ SCOPE      SERVICE   SECRET
 
 | Service     | Environment variable(s)                       | API domain(s)                       |
 |-------------|-----------------------------------------------|-------------------------------------|
-| `anthropic` | `ANTHROPIC_API_KEY`                           | `api.anthropic.com`                 |
 | `openai`    | `OPENAI_API_KEY`                              | `api.openai.com`                    |
 | `github`    | `GH_TOKEN`, `GITHUB_TOKEN`                    | `api.github.com`, `github.com`      |
 | `google`    | `GEMINI_API_KEY`, `GOOGLE_API_KEY`            | `generativelanguage.googleapis.com` |
@@ -219,12 +235,17 @@ isn't needed.
 
 ## 5. Create your sandbox
 
-### Bring your Claude config (optional)
+### Bring your Codex project instructions
 
-The sandbox can only see your workspace directory — per-user config files like `~/.claude/CLAUDE.md` or `~/.claude/settings.json` are not available inside the VM. If you rely on any of those, copy them into your project before creating the sandbox:
+The sandbox can only see your workspace directory. Codex won't pick up user-level
+configuration from your host, such as `~/.codex`. Put project-specific instructions
+in an `AGENTS.md` file in the repo instead. This repository already includes one.
+
+If you keep reusable guidance in your user-level Codex config, copy the relevant
+parts into the project before creating the sandbox:
 
 ```bash
-cp ~/.claude/CLAUDE.md ~/sbx-quickstart/CLAUDE.md
+cp ~/.codex/AGENTS.md ~/sbx-quickstart/AGENTS.md
 ```
 
 > **Note**: Symlinks won't work here. The sandbox cannot follow a symlink that points outside its designated workspace, so copy the files directly.
@@ -241,15 +262,16 @@ creates one on the fly if it doesn't exist yet).
 **Mac users:**
 
 ```bash
-sbx create --name=quickstart claude .
+sbx create --name=quickstart codex .
 ```
 
 **Windows users:**
 
-By default the Windows sandbox templates do not include the Docker engine, but you will need it for later exercises. Pass `--template` at create time:
+Use the same Codex agent. If you want to pin the documented Codex template explicitly,
+pass `--template` at create time:
 
 ```powershell
-sbx create --name=quickstart --template docker.io/docker/sandbox-templates:claude-code-docker claude .
+sbx create --name=quickstart --template docker.io/docker/sandbox-templates:codex codex .
 ```
 
 Confirm it was created:
@@ -264,27 +286,17 @@ Now attach to it:
 sbx run quickstart
 ```
 
-### Log in to Claude
+### Confirm Codex authentication
 
-Once the sandbox starts, the Claude interface loads. Authenticate with:
-
-```
-/login
-```
-
-Choose your preferred login option.
-
-> **Note**: If you choose Option 1, the `c for copy` shortcut does not work and the
-> sandbox will not automatically open a browser. Copy the login URL manually, complete
-> the OAuth flow, and paste the returned code back into the sandbox. You only need to
-> do this once.
-
+If you used `sbx secret set -g openai --oauth`, the browser authentication already
+happened on your host. If you used an API key, the sandbox receives a proxy-managed
+OpenAI credential when it is created. You don't need to run `/login` inside Codex.
 
 ---
 
 ## 6. Orient yourself
 
-Once Claude is authenticated, give Claude the following prompt:
+Once you're attached to Codex, give it the following prompt:
 
 ```
 Explore this codebase and give me:
@@ -294,8 +306,8 @@ Explore this codebase and give me:
 4. What the test suite covers
 ```
 
-Claude will read the source files, check the requirements, and report back. Because the
-workspace is mounted directly into the VM, Claude sees your actual files — including
+Codex will read the source files, check the requirements, and report back. Because the
+workspace is mounted directly into the VM, Codex sees your actual files — including
 any changes you make on the host while it's running.
 
 ### Controlling the session
@@ -303,7 +315,8 @@ any changes you make on the host while it's running.
 `sbx run` is interactive — it occupies your terminal as a live agent session.
 
 - Press **`Ctrl-C` twice** to exit the session and drop back to your host terminal. 
-- Type **`!`** before any command inside Claude to run it as a shell command without leaving the session — e.g. `!ls` or `!git status`.
+- To run shell commands while Codex is active, ask Codex to run them, or use
+  `sbx exec` from a second host terminal.
 
 Go ahead and exit the sandbox by **pressing `ctrl-c` twice** 
 
@@ -332,7 +345,7 @@ The dashboard shows all sandboxes as cards with live CPU and memory usage.
 The **Network panel** (press `Tab`) shows a live log of every outbound connection the
 sandbox makes — which hosts were reached, which were blocked. Use the arrow keys to
 navigate the log and allow or block hosts directly. This is the fastest way to debug
-"why can't Claude install this package?"
+"why can't Codex install this package?"
 
 **Press `Ctrl-C` and then `Y`** to exit the dashboard without stopping any sandboxes.
 
@@ -340,8 +353,8 @@ navigate the log and allow or block hosts directly. This is the fastest way to d
 
 ## 8. Run tests and fix bugs
 
-This exercise shows Claude working in **direct mode** — the default, where edits land
-in your working tree. You'll have Claude run the test suite, identify failures, fix the
+This exercise shows Codex working in **direct mode** — the default, where edits land
+in your working tree. You'll have Codex run the test suite, identify failures, fix the
 bugs, and confirm everything passes.
 
 Reconnect to your sandbox:
@@ -352,7 +365,7 @@ sbx run quickstart
 
 **Step 1 — Run the tests:**
 
-Give Claude the following prompt:
+Give Codex the following prompt:
 
 ```
 Set up the Python environment for the FastAPI backend and run the test suite.
@@ -368,7 +381,7 @@ It will take about 3-4 minutes for this to all complete.
 
 **Step 2 — Fix the bugs:**
 
-Give Claude the following prompt:
+Give Codex the following prompt:
 
 ```
 Two tests are failing due to a pagination bug. Fix it:
@@ -382,13 +395,13 @@ For each fix:
 - Re-run the specific test to confirm it passes before moving on
 ```
 
-While Claude works, you can open the affected files in your editor on the host. You'll see Claude's
+While Codex works, you can open the affected files in your editor on the host. You'll see Codex's
 edits — the workspace mount is bidirectional and instant. No copy
 step, no polling delay.
 
 **Step 3 — Confirm everything passes:**
 
-Give Claude the following prompt:
+Give Codex the following prompt:
 
 ```
 Run the full test suite and confirm all tests pass (or are intentionally skipped).
@@ -403,11 +416,11 @@ and reconnect to `quickstart`, you won't need to `pip install` again.
 
 ### Direct mode vs. branch mode
 
-Everything in section 8 ran in **direct mode** — Claude edited your working tree and
+Everything in section 8 ran in **direct mode** — Codex edited your working tree and
 you could see the changes immediately. That's great for interactive work.
 
-**Branch mode** gives Claude its own Git worktree and branch, isolated from your main
-working tree. You keep working normally; Claude works on its branch; you review the
+**Branch mode** gives Codex its own Git worktree and branch, isolated from your main
+working tree. You keep working normally; Codex works on its branch; you review the
 diff and merge when you're happy. Use it when you want a clean diff to review before
 anything lands, or when running multiple agents simultaneously.
 
@@ -415,7 +428,7 @@ anything lands, or when running multiple agents simultaneously.
 
 If you are currently in the sandbox **press `ctrl-c` twice to exit**
 
-Add `--branch` to put Claude on its own worktree. This works on your existing
+Add `--branch` to put Codex on its own worktree. This works on your existing
 `quickstart` sandbox — no new sandbox is created:
 
 ```bash
@@ -426,7 +439,7 @@ sbx run quickstart --branch=fix-bugs
 
 `sbx` creates a worktree under `.sbx/quickstart-worktrees/fix-bugs` in your repo root.
 
-Give Claude the following prompt:
+Give Codex the following prompt:
 
 ```
 One test is still failing after the direct-mode fix. The updated_at field in backend/app/models.py
@@ -520,7 +533,7 @@ gh pr create --head add-notif \
 
 ## 10. Docker Compose inside the sandbox
 
-Each sandbox has its own private Docker daemon. Claude can run `docker compose up`,
+Each sandbox has its own private Docker daemon. Codex can run `docker compose up`,
 build images, and start containers — none of which appear in your host's `docker ps`.
 
 If necessary, reconnect to your sandbox:
@@ -529,7 +542,7 @@ If necessary, reconnect to your sandbox:
 sbx run quickstart
 ```
 
-Give Claude the following prompt:
+Give Codex the following prompt:
 
 ```
 Start the full application stack using Docker Compose.
@@ -543,16 +556,16 @@ Use the API docs at http://localhost:8000/docs if helpful.
 Make sure all servers bind to 0.0.0.0 so I can reach them via port forwarding.
 ```
 
-Claude will `docker compose up --build -d`, wait for the `db` healthcheck to pass,
+Codex will `docker compose up --build -d`, wait for the `db` healthcheck to pass,
 then hit the API endpoints with `curl` or `httpx`.
 
 You can see the running containers in the sandbox. 
 
 ```bash
-! docker ps
+sbx exec -it quickstart docker ps
 ```
 
-The containers Claude starts live entirely inside the sandbox. When you `sbx rm` the
+The containers Codex starts live entirely inside the sandbox. When you `sbx rm` the
 sandbox, all images, containers, and Postgres data are deleted automatically.
 
 ---
@@ -563,7 +576,7 @@ Sandboxes are network-isolated — your browser can't reach a server inside one 
 default. `sbx ports` punches a hole from a host port to a sandbox port.
 
 > **Terminal note**: `sbx ports` is a host-side command. Run it in a new terminal tab
-> while Claude is running
+> while Codex is running
 
 ### Forward the API
 
@@ -602,7 +615,7 @@ sbx ports quickstart --unpublish 8080:8000
 
 > **Gotcha**: services inside the sandbox must bind to `0.0.0.0`, not `127.0.0.1`.
 > Most dev servers default to `127.0.0.1` — that's why the prompt in section 10
-> explicitly asks Claude to bind to `0.0.0.0`.
+> explicitly asks Codex to bind to `0.0.0.0`.
 
 > **Gotcha**: published ports don't survive a sandbox stop/restart. Re-run `sbx ports`
 > after restarting.
@@ -648,7 +661,7 @@ sbx policy allow network smtp.mailgun.org
 # Allow multiple at once
 sbx policy allow network "smtp.mailgun.org,api.sendgrid.com"
 
-# Allow all npm and PyPI (useful if Claude can't install packages)
+# Allow all npm and PyPI (useful if Codex can't install packages)
 sbx policy allow network "*.npmjs.org,*.pypi.org,files.pythonhosted.org"
 ```
 
@@ -688,7 +701,7 @@ sbx rm quickstart
 Now recreate it with both workspaces mounted:
 
 ```bash
-sbx run --name=quickstart claude ~/sbx-quickstart/backend ~/sbx-quickstart/frontend:ro
+sbx run codex --name=quickstart ~/sbx-quickstart/backend ~/sbx-quickstart/frontend:ro
 ```
 
 - `~/sbx-quickstart/backend` — primary workspace (read/write); agent starts here
@@ -699,7 +712,7 @@ messages match what you see locally.
 
 ### Cross-repo exercise
 
-With both workspaces mounted, give Claude the following prompt:
+With both workspaces mounted, give Codex the following prompt:
 
 ```
 The frontend's api.ts sends search requests to GET /issues/search, but the
@@ -711,7 +724,7 @@ the error handling is user-friendly when the endpoint isn't available yet.
 The frontend is read-only — propose the change but don't apply it.
 ```
 
-This pattern is common in monorepo setups where you want Claude to understand the full
+This pattern is common in monorepo setups where you want Codex to understand the full
 picture but only write to specific parts.
 
 ---
@@ -719,13 +732,13 @@ picture but only write to specific parts.
 ## 14. Debugging with `sbx exec`
 
 `sbx exec` opens a shell (or runs a one-off command) inside a running sandbox. Always
-run it from a host terminal — it's not something you type inside the Claude session.
+run it from a host terminal — it's not something you type inside the Codex session.
 
 ```bash
 sbx exec -it quickstart bash
 ```
 
-From inside the sandbox you can inspect the environment Claude is working in:
+From inside the sandbox you can inspect the environment Codex is working in:
 
 ```bash
 docker ps                                          # what containers are running?
@@ -733,7 +746,7 @@ pip list | grep fastapi                            # what's installed?
 curl -s http://localhost:8000/health | python3 -m json.tool   # is the API up?
 ```
 
-Type `exit` to leave. The Claude session keeps running.
+Type `exit` to leave. The Codex session keeps running.
 
 ### Run a one-off command without opening a shell
 
@@ -751,7 +764,7 @@ sbx exec -d quickstart bash -c \
   "echo 'export SMTP_HOST=smtp.mailgun.org' >> /etc/sandbox-persistent.sh"
 ```
 
-The file is sourced on every login shell, so Claude will see the variable in
+The file is sourced on every login shell, so Codex will see the variable in
 subsequent sessions.
 
 ---
@@ -760,14 +773,14 @@ subsequent sessions.
 
 > **Note**: This section is for reference only. Building custom templates requires Docker Desktop (or another Docker daemon) installed on your host machine — it is not something you do inside the sandbox.
 
-Every built-in agent template (`claude-code`, `codex`, `gemini`, etc.) is a plain Docker image. You can extend any of them to pre-bake toolchains, language runtimes, config files, or any other dependencies your project needs. Claude won't have to install them at the start of every session.
+Every built-in agent template (`codex`, `gemini`, etc.) is a plain Docker image. You can extend any of them to pre-bake toolchains, language runtimes, config files, or any other dependencies your project needs. Codex won't have to install them at the start of every session.
 
 ### Create a Dockerfile
 
 Start `FROM` an existing sandbox template and layer your additions on top. Switch between `root` (for system packages) and `agent` (for user-level tools) as needed:
 
 ```dockerfile
-FROM docker/sandbox-templates:claude-code
+FROM docker/sandbox-templates:codex
 
 USER root
 RUN apt-get update && apt-get install -y protobuf-compiler
@@ -787,7 +800,7 @@ Push to any registry Docker can pull from — Docker Hub, GHCR, ECR, etc.
 ### Use your template
 
 ```bash
-sbx run --template docker.io/my-org/my-template:v1 claude
+sbx run codex --template docker.io/my-org/my-template:v1
 ```
 
 The image is pulled and cached locally on first use. Subsequent sandbox starts reuse the cached image. If you update the image and want the new version, run `sbx reset` to clear the cache, or use a new tag.
@@ -796,8 +809,6 @@ The image is pulled and cached locally on first use. Subsequent sandbox starts r
 
 | Template | Includes |
 |----------|----------|
-| `docker/sandbox-templates:claude-code` | Claude Code, standard toolchain |
-| `docker/sandbox-templates:claude-code-docker` | Claude Code + Docker Engine (required for Docker Compose on Windows) |
 | `docker/sandbox-templates:codex` | OpenAI Codex |
 | `docker/sandbox-templates:gemini` | Gemini CLI |
 | `docker/sandbox-templates:shell` | Bare Bash — no agent pre-installed |
@@ -808,7 +819,7 @@ All base images include Ubuntu, Git, GitHub CLI, Node.js, Go, Python 3, and comm
 
 ## Appendix A: Prompt library
 
-These prompts are designed to work well with Claude in a Docker Sandbox.
+These prompts are designed to work well with Codex in a Docker Sandbox.
 
 ---
 
@@ -928,12 +939,12 @@ Rules:
 
 ```bash
 # ── Lifecycle ──────────────────────────────────────────────────────────────────
-sbx run --name=quickstart claude         # create and attach to a named sandbox
+sbx run codex --name=quickstart         # create and attach to a named sandbox
 sbx run quickstart                       # reconnect to an existing sandbox
-sbx run quickstart --branch=my-feature   # branch mode — Claude works on own worktree
+sbx run quickstart --branch=my-feature   # branch mode — Codex works on own worktree
 sbx run quickstart --branch=my-feature \
   -- "$(cat p.txt)"                      # pass a prompt from a file (quotes required)
-sbx create [AGENT] [WORKSPACE]           # create without attaching
+sbx create --name=quickstart codex .     # create without attaching
 sbx ls                                   # list sandboxes
 sbx stop quickstart                      # pause (preserves installed packages)
 sbx rm quickstart                        # delete sandbox + VM + worktrees
@@ -961,7 +972,9 @@ sbx policy set-default balanced                     # set default without prompt
 
 # ── Credentials ────────────────────────────────────────────────────────────────
 sbx secret set -g github                 # store GitHub token globally
-sbx secret set quickstart anthropic      # scope to one sandbox
+sbx secret set -g openai                 # store OpenAI API key globally
+sbx secret set -g openai --oauth         # or use OpenAI OAuth globally
+sbx secret set quickstart openai         # scope OpenAI auth to one sandbox
 sbx secret ls                            # list stored secrets
 sbx secret rm -g github                  # remove a secret
 
@@ -1010,16 +1023,16 @@ sbx login
 
 ### Agent can't reach the model provider
 
-1. Check that `api.anthropic.com` is in the allow list: `sbx policy log`
+1. Check that `api.openai.com` is in the allow list: `sbx policy log`
 2. If you're in Locked Down mode, explicitly allow it:
    ```bash
-   sbx policy allow network api.anthropic.com
+   sbx policy allow network api.openai.com
    ```
 3. If you set a global secret while a sandbox was already running, the secret won't
    be available — global secrets are injected at creation time. Recreate the sandbox:
    ```bash
    sbx rm quickstart
-   sbx run --name=quickstart claude
+   sbx run codex --name=quickstart
    ```
 
 ---
@@ -1046,10 +1059,10 @@ sbx run quickstart
 
 ---
 
-### Docker not available inside the sandbox (Windows)
+### Docker not available inside the sandbox
 
-Use the `-docker` template variant:
+Confirm you're using the documented Codex template:
 
 ```bash
-sbx run --template docker.io/docker/sandbox-templates:claude-code-docker --name=quickstart claude
+sbx run codex --template docker.io/docker/sandbox-templates:codex --name=quickstart
 ```

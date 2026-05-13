@@ -14,14 +14,15 @@ Official Docker Sandboxes docs: **https://docs.docker.com/ai/sandboxes/**
 
 Key sub-pages:
 - Get started / usage
-- Agents (claude-code, codex, copilot, gemini, docker-agent, kiro, opencode, custom-environments)
+- Agents (codex, copilot, gemini, docker-agent, kiro, opencode, custom-environments)
 - Architecture, security, credentials
 - Troubleshooting / FAQ
 
 ## Key sbx CLI Facts (from docs, for verification)
 
-- `sbx create` requires explicit workspace path: `sbx create --name=foo claude .`
-- `sbx run` infers current dir: `sbx run claude` or reconnect with `sbx run <sandbox-name>`
+- `sbx create` requires explicit workspace path: `sbx create --name=foo codex .`
+- `sbx run` infers current dir: `sbx run codex` or reconnect with `sbx run <sandbox-name>`
+- Codex auth should use `sbx secret set -g openai` or `sbx secret set -g openai --oauth`
 - Worktrees stored at `.sbx/<sandbox-name>-worktrees/<branch>/`
 - Multiple workspaces: first path = primary (rw), extras append `:ro` for read-only
 - `sbx policy deny` — confirmed valid (allow, deny, log, ls, reset, rm, set-default all confirmed via `sbx policy --help`)
@@ -77,7 +78,7 @@ the basis for exercises in the Docker Sandboxes guide:
 4. **Search not implemented** — `GET /projects/{id}/issues/search` returns `501`.
 5. **Email notifications are stubs** — `services/notifications.py` logs but doesn't send.
 
-See the Docker Sandboxes guide for step-by-step exercises that use Claude to find
+See the Docker Sandboxes guide for step-by-step exercises that use Codex to find
 and fix each of these.
 
 ## Project structure

@@ -43,7 +43,7 @@ the basis for exercises in the Docker Sandboxes guide:
 4. **Search not implemented** — `GET /projects/{id}/issues/search` returns `501`.
 5. **Email notifications are stubs** — `services/notifications.py` logs but doesn't send.
 
-See the Docker Sandboxes guide for step-by-step exercises that use Claude to find
+See the Docker Sandboxes guide for step-by-step exercises that use Codex to find
 and fix each of these.
 
 ## Project structure
