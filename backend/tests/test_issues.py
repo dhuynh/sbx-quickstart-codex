@@ -9,10 +9,17 @@ Run these tests with:  pytest tests/test_issues.py -v
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _create_issue(client, auth_headers, project_id, title="Bug: login fails", priority="high"):
+def _create_issue(
+    client,
+    auth_headers,
+    project_id,
+    title="Bug: login fails",
+    description="Steps to reproduce...",
+    priority="high",
+):
     resp = client.post(
         f"/projects/{project_id}/issues/",
-        json={"title": title, "description": "Steps to reproduce...", "priority": priority},
+        json={"title": title, "description": description, "priority": priority},
         headers=auth_headers,
     )
     assert resp.status_code == 201
@@ -126,45 +133,40 @@ def test_pagination_second_page(client, auth_headers, project):
     )
 
 
-# ── Search (not yet implemented) ──────────────────────────────────────────────
+# ── Search ────────────────────────────────────────────────────────────────────
 
 
-def test_search_returns_501_until_implemented(client, auth_headers, project):
-    """Search endpoint should return 501 until the TODO is completed."""
+def test_search_returns_empty_page_when_no_issues_match(client, auth_headers, project):
     resp = client.get(
         f"/projects/{project['id']}/issues/search",
         params={"q": "login"},
         headers=auth_headers,
     )
-    assert resp.status_code == 501
+    assert resp.status_code == 200
+    assert resp.json() == {"total": 0, "page": 1, "page_size": 20, "items": []}
 
 
 def test_search_finds_matching_issues(client, auth_headers, project):
-    """
-    TODO TEST: Once search is implemented, this should pass.
-
-    After completing the TODO in issues.py, the search endpoint should
-    return issues whose title or description contains the query string.
-    This test will FAIL until the TODO is implemented.
-    """
     _create_issue(client, auth_headers, project["id"], title="Login page crashes on Safari")
-    _create_issue(client, auth_headers, project["id"], title="Dashboard layout broken")
+    _create_issue(
+        client,
+        auth_headers,
+        project["id"],
+        title="Dashboard layout broken",
+        description="Login widget overlaps the sidebar",
+    )
+    _create_issue(client, auth_headers, project["id"], title="Profile image upload fails")
 
     resp = client.get(
         f"/projects/{project['id']}/issues/search",
         params={"q": "login"},
         headers=auth_headers,
     )
-    # Will return 501 until implemented — change to assert resp.status_code == 200
-    # after completing the TODO.
-    if resp.status_code == 501:
-        import pytest
-        pytest.skip("Search not yet implemented — complete the TODO first")
-
     assert resp.status_code == 200
     results = resp.json()
-    assert len(results) == 1
-    assert results[0]["title"] == "Login page crashes on Safari"
+    assert results["total"] == 2
+    titles = {issue["title"] for issue in results["items"]}
+    assert titles == {"Login page crashes on Safari", "Dashboard layout broken"}
 
 
 # ── updated_at bug ────────────────────────────────────────────────────────────
