@@ -8,6 +8,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    event,
 )
 from sqlalchemy.orm import relationship
 
@@ -53,8 +54,7 @@ class Project(Base):
     description = Column(Text, nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
-    # BUG: missing onupdate — updated_at is never refreshed on UPDATE
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     owner = relationship("User", back_populates="projects")
     issues = relationship("Issue", back_populates="project", cascade="all, delete-orphan")
@@ -72,8 +72,7 @@ class Issue(Base):
     reporter_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     assignee_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    # BUG: missing onupdate — updated_at is never refreshed on UPDATE
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     project = relationship("Project", back_populates="issues")
     reporter = relationship(
@@ -98,3 +97,13 @@ class Comment(Base):
 
     issue = relationship("Issue", back_populates="comments")
     author = relationship("User", back_populates="comments")
+
+
+@event.listens_for(Project, "before_update")
+def refresh_project_updated_at(mapper, connection, target):
+    target.updated_at = datetime.utcnow()
+
+
+@event.listens_for(Issue, "before_update")
+def refresh_issue_updated_at(mapper, connection, target):
+    target.updated_at = datetime.utcnow()
