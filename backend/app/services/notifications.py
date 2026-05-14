@@ -1,17 +1,9 @@
-"""
-Notification service for DevBoard.
+"""Notification service for DevBoard."""
 
-TODO: Implement email notifications when issue status changes.
-      Currently logs to stdout only. A real implementation should:
-        1. Load SMTP settings from config (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS)
-        2. Look up the issue assignee and reporter emails from the database
-        3. Render an HTML template with the status change details
-        4. Send via smtplib or an async library like aiosmtplib
-
-      A stub for the async email send is left below.
-"""
-
+from email.message import EmailMessage
 import logging
+import os
+import smtplib
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -25,13 +17,9 @@ async def send_status_change_notification(
     assignee_email: Optional[str] = None,
     reporter_email: Optional[str] = None,
 ) -> None:
-    """
-    Notify relevant users when an issue status changes.
-
-    Currently a no-op stub — replace with real email logic.
-    """
+    """Notify the issue reporter when an issue status changes."""
     logger.info(
-        "[NOTIFY] Issue #%d ('%s') changed: %s → %s | "
+        "[NOTIFY] Issue #%d ('%s') changed: %s -> %s | "
         "assignee=%s reporter=%s",
         issue_id,
         issue_title,
@@ -41,27 +29,68 @@ async def send_status_change_notification(
         reporter_email or "unknown",
     )
 
-    # TODO: implement actual email sending
-    # Example skeleton:
-    #
-    # import aiosmtplib
-    # from email.mime.text import MIMEText
-    #
-    # if not assignee_email:
-    #     return
-    #
-    # message = MIMEText(
-    #     f"Issue '{issue_title}' moved from {old_status} to {new_status}."
-    # )
-    # message["Subject"] = f"[DevBoard] Issue #{issue_id} status update"
-    # message["From"] = settings.smtp_user
-    # message["To"] = assignee_email
-    #
-    # await aiosmtplib.send(
-    #     message,
-    #     hostname=settings.smtp_host,
-    #     port=settings.smtp_port,
-    #     username=settings.smtp_user,
-    #     password=settings.smtp_pass,
-    #     use_tls=True,
-    # )
+    if not reporter_email:
+        logger.warning(
+            "Skipping status change notification for issue #%d: reporter email is missing",
+            issue_id,
+        )
+        return
+
+    smtp_host = os.getenv("SMTP_HOST")
+    smtp_port = os.getenv("SMTP_PORT")
+    smtp_user = os.getenv("SMTP_USER")
+    smtp_pass = os.getenv("SMTP_PASS")
+
+    missing = [
+        name
+        for name, value in {
+            "SMTP_HOST": smtp_host,
+            "SMTP_PORT": smtp_port,
+            "SMTP_USER": smtp_user,
+            "SMTP_PASS": smtp_pass,
+        }.items()
+        if not value
+    ]
+    if missing:
+        logger.warning(
+            "Skipping status change notification for issue #%d: missing SMTP config %s",
+            issue_id,
+            ", ".join(missing),
+        )
+        return
+
+    try:
+        port = int(smtp_port)
+    except ValueError:
+        logger.warning(
+            "Skipping status change notification for issue #%d: SMTP_PORT must be an integer",
+            issue_id,
+        )
+        return
+
+    issue_link = f"http://localhost:3000/issues/{issue_id}"
+    message = EmailMessage()
+    message["Subject"] = f"[DevBoard] Issue #{issue_id} status changed"
+    message["From"] = smtp_user
+    message["To"] = reporter_email
+    message.set_content(
+        "\n".join(
+            [
+                f"Issue: {issue_title}",
+                f"Old status: {old_status}",
+                f"New status: {new_status}",
+                f"Link: {issue_link}",
+            ]
+        )
+    )
+
+    try:
+        with smtplib.SMTP(smtp_host, port) as smtp:
+            smtp.starttls()
+            smtp.login(smtp_user, smtp_pass)
+            smtp.send_message(message)
+    except (OSError, smtplib.SMTPException):
+        logger.exception(
+            "Failed to send status change notification for issue #%d",
+            issue_id,
+        )
