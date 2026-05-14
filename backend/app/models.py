@@ -8,6 +8,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    event,
 )
 from sqlalchemy.orm import relationship
 
@@ -96,3 +97,13 @@ class Comment(Base):
 
     issue = relationship("Issue", back_populates="comments")
     author = relationship("User", back_populates="comments")
+
+
+@event.listens_for(Project, "before_update")
+def refresh_project_updated_at(mapper, connection, target):
+    target.updated_at = datetime.utcnow()
+
+
+@event.listens_for(Issue, "before_update")
+def refresh_issue_updated_at(mapper, connection, target):
+    target.updated_at = datetime.utcnow()
